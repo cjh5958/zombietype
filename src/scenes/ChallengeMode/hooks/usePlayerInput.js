@@ -19,6 +19,9 @@ export const usePlayerInput = (gameState, updateGameState, onCorrectAnswer, onWr
   // DOM element ref for direct input field manipulation
   const inputElementRef = useRef(null);
 
+  // State for visual input display
+  const [currentInput, setCurrentInput] = useState('');
+
   // Retain only necessary state
   const [isWrong, setIsWrong] = useState(false);
 
@@ -37,6 +40,7 @@ export const usePlayerInput = (gameState, updateGameState, onCorrectAnswer, onWr
 
     // Directly clear the input field value
     inputRef.current = '';
+    setCurrentInput('');
     if (inputElementRef.current) {
       inputElementRef.current.value = '';
     }
@@ -53,6 +57,7 @@ export const usePlayerInput = (gameState, updateGameState, onCorrectAnswer, onWr
     (e) => {
       const value = e.target.value;
       inputRef.current = value;
+      setCurrentInput(value);
 
       // Immediately check answer completion status
       if (value.length === currentAnswer.length) {
@@ -75,6 +80,7 @@ export const usePlayerInput = (gameState, updateGameState, onCorrectAnswer, onWr
    */
   const clearInput = useCallback(() => {
     inputRef.current = '';
+    setCurrentInput('');
     if (inputElementRef.current) {
       inputElementRef.current.value = '';
     }
@@ -87,6 +93,7 @@ export const usePlayerInput = (gameState, updateGameState, onCorrectAnswer, onWr
    */
   const resetInput = useCallback(() => {
     inputRef.current = '';
+    setCurrentInput('');
     if (inputElementRef.current) {
       inputElementRef.current.value = '';
     }
@@ -111,6 +118,7 @@ export const usePlayerInput = (gameState, updateGameState, onCorrectAnswer, onWr
 
       // Directly clear the input field
       inputRef.current = '';
+      setCurrentInput('');
       if (inputElementRef.current) {
         inputElementRef.current.value = '';
       }
@@ -139,6 +147,7 @@ export const usePlayerInput = (gameState, updateGameState, onCorrectAnswer, onWr
 
       // Directly clear the input field
       inputRef.current = '';
+      setCurrentInput('');
       if (inputElementRef.current) {
         inputElementRef.current.value = '';
       }
@@ -151,11 +160,16 @@ export const usePlayerInput = (gameState, updateGameState, onCorrectAnswer, onWr
   // Register input element reference
   const registerInputRef = useCallback((el) => {
     inputElementRef.current = el;
+    // Ensure the hidden input field maintains focus
+    if (el && document.activeElement !== el) {
+      el.focus();
+    }
   }, []);
 
   // Return functions and state for external use
   return {
     inputValue: inputRef.current, // Provide inputValue for compatibility
+    currentInput, // Current typed text for visual display
     isWrong,
     currentAnswer,
     handleInputChange,

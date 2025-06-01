@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef, useState } from 'react';
 import { useGameState } from './hooks/useGameState';
 import { useLevelManager } from './hooks/useLevelManager';
 import { usePlayerInput } from './hooks/usePlayerInput';
@@ -10,8 +10,11 @@ import { GAME_CONFIG } from './gameConfig';
 import { useVolumeControl } from '../../context/GameSettingsContext';
 import SummaryPage from './SummaryPage';
 
-// Import CSS for shake animation
-import './shake.css';
+// Import new CSS styles
+import './ChallengeMode.css';
+
+// Import character image
+import zombieCharacter from './assets/images/characters/zombie-character.png';
 
 /**
  * Challenge Mode Component
@@ -39,6 +42,10 @@ export default function ChallengeMode({ onBack }) {
   const soundManager = useSoundManager();
   const { volume } = useVolumeControl();
   soundManager.setMasterVolume(volume);
+
+  // Add ref for measuring text width
+  const textMeasureRef = useRef(null);
+  const [panelWidth, setPanelWidth] = useState(740); // 預設2x尺寸 (370px × 2)
 
   // decide zombie bahavior from their types
 
@@ -114,6 +121,29 @@ export default function ChallengeMode({ onBack }) {
     handleWrongAnswer
   );
 
+  // Handle click anywhere to refocus input
+  const handleContainerClick = useCallback(() => {
+    const inputElement = document.querySelector('.typing-input');
+    if (inputElement) {
+      inputElement.focus();
+    }
+  }, []);
+
+  // Initialize focus when game starts
+  useEffect(() => {
+    const focusInput = () => {
+      const inputElement = document.querySelector('.typing-input');
+      if (inputElement) {
+        inputElement.focus();
+      }
+    };
+
+    // Focus after a short delay to ensure DOM is ready
+    const timeoutId = setTimeout(focusInput, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [gameState.gameOver]);
+
   /**
    * Fetch the type of zombie to spawn and request question(s)
    *
@@ -135,6 +165,64 @@ export default function ChallengeMode({ onBack }) {
   */
 
   /**
+   * Calculate optimal panel width based on question text
+   * Base size: 370×370px, only stretch width when needed
+   */
+  const calculatePanelWidth = useCallback((question) => {
+    if (!question || !textMeasureRef.current) return 740; // 預設2x尺寸
+
+    // Create temporary element for measuring
+    const measureElement = textMeasureRef.current;
+
+    // Measure English text width (using larger 2x font size)
+    measureElement.style.cssText = ''; // 清空之前的樣式
+    measureElement.style.font = '48px DonegalOne, Georgia, serif'; /* 配合CSS放大字體 24px × 2 */
+    measureElement.style.fontWeight = 'bold';
+    measureElement.style.letterSpacing = '2px'; /* 配合CSS字距 */
+    measureElement.style.whiteSpace = 'nowrap'; /* 確保不換行 */
+    measureElement.style.visibility = 'hidden'; /* 確保隱藏但保持layout */
+    measureElement.style.position = 'absolute';
+    measureElement.style.left = '-9999px';
+    measureElement.textContent = question.description || '';
+    const englishWidth = measureElement.offsetWidth;
+
+    // Measure Chinese text width (using larger 2x font size)
+    measureElement.style.cssText = ''; // 清空之前的樣式
+    measureElement.style.font =
+      '36px YujiBoku, Microsoft YaHei, sans-serif'; /* 配合CSS放大字體 18px × 2 */
+    measureElement.style.fontWeight = 'normal';
+    measureElement.style.letterSpacing = 'normal';
+    measureElement.style.whiteSpace = 'nowrap'; /* 確保不換行 */
+    measureElement.style.visibility = 'hidden'; /* 確保隱藏但保持layout */
+    measureElement.style.position = 'absolute';
+    measureElement.style.left = '-9999px';
+    measureElement.textContent = question.translation || '';
+    const chineseWidth = measureElement.offsetWidth;
+
+    // Use the wider text as base (before scaling)
+    const rawContentWidth = Math.max(englishWidth, chineseWidth);
+
+    // 直接計算面板總寬度需求
+    const paddingWidth = 80; // 50px + 30px (左右padding in 2x)
+    const comfortSpace = 80; // 緩衝空間
+    const letterSpacingBuffer = rawContentWidth * 0.1; // 字距緩衝，約10%寬度
+    const requiredPanelWidth = rawContentWidth + paddingWidth + comfortSpace + letterSpacingBuffer;
+
+    // 基礎面板寬度 (370px × 2)
+    const basePanelWidth = 740;
+
+    // 只有當需要的面板寬度超過基礎尺寸時才拉伸
+    if (requiredPanelWidth <= basePanelWidth) {
+      return basePanelWidth; // 使用預設最小尺寸 (370px × 2)
+    } else {
+      // 設定最大寬度限制 (2x scale)
+      const maxWidth = 2000; // 1000px × 2，足夠容納超長題目
+
+      return Math.min(requiredPanelWidth, maxWidth);
+    }
+  }, []);
+
+  /**
    * Generate new zombie and question
    */
   const generateNewZombie = useCallback(() => {
@@ -148,27 +236,42 @@ export default function ChallengeMode({ onBack }) {
     }
     questionManager.updateCurrentQuestion(question);
     playerInput.updateCurrentAnswer(question.answer, question.difficulty);
-  }, [questionManager, playerInput, zombieManager, gameState.currentDifficulty]);
+
+    // Calculate and set panel width based on question content
+    const newWidth = calculatePanelWidth(question);
+    setPanelWidth(newWidth);
+  }, [
+    questionManager,
+    playerInput,
+    zombieManager,
+    gameState.currentDifficulty,
+    calculatePanelWidth
+  ]);
 
   //extra handleinput for mimic
-  const handleInputWithMimic = (e) => {
-    const value = e.target.value;
-    const currentZombie = zombieManager.getCurrentZombie();
-    const behavior = currentZombie?.behavior;
+  const handleInputWithMimic = useCallback(
+    (e) => {
+      const value = e.target.value;
+      const currentZombie = zombieManager.getCurrentZombie();
+      const behavior = currentZombie?.behavior;
 
-    if (behavior === 'mimic') {
-      const revealed = zombieManager.getExtraState('mimicRevealed');
-      const realQuestion = zombieManager.getExtraState('realAnswer');
-      if (!revealed && value.length > 0) {
-        zombieManager.setExtraState('mimicRevealed', true);
-        questionManager.updateCurrentQuestion(realQuestion);
-        return;
+      if (behavior === 'mimic') {
+        const revealed = zombieManager.getExtraState('mimicRevealed');
+        const realQuestion = zombieManager.getExtraState('realAnswer');
+        if (!revealed && value.length > 0) {
+          zombieManager.setExtraState('mimicRevealed', true);
+          questionManager.updateCurrentQuestion(realQuestion);
+          const newWidth = calculatePanelWidth(realQuestion);
+          setPanelWidth(newWidth);
+          return;
+        }
       }
-    }
 
-    // if not mimic use origin handleinput
-    playerInput.handleInputChange(e);
-  };
+      // if not mimic use origin handleinput
+      playerInput.handleInputChange(e);
+    },
+    [zombieManager, questionManager, calculatePanelWidth, setPanelWidth, playerInput]
+  );
 
   const zombieBehaviors = useCallback(
     (zombie, situation) => {
@@ -185,6 +288,8 @@ export default function ChallengeMode({ onBack }) {
         }
         questionManager.updateCurrentQuestion(boss_question);
         playerInput.updateCurrentAnswer(boss_question.answer, boss_question.difficulty);
+        const newWidth = calculatePanelWidth(boss_question);
+        setPanelWidth(newWidth);
         return true;
       }
 
@@ -202,6 +307,8 @@ export default function ChallengeMode({ onBack }) {
         playerInput.updateCurrentAnswer(realQuestion.answer, realQuestion.difficulty);
         zombieManager.setExtraState('mimicRevealed', false);
         zombieManager.setExtraState('realAnswer', realQuestion);
+        const newWidth = calculatePanelWidth(fakeQuestion);
+        setPanelWidth(newWidth);
         return true;
       }
 
@@ -210,6 +317,8 @@ export default function ChallengeMode({ onBack }) {
         if (newQuestion) {
           questionManager.updateCurrentQuestion(newQuestion);
           playerInput.updateCurrentAnswer(newQuestion.answer, newQuestion.difficulty);
+          const newWidth = calculatePanelWidth(newQuestion);
+          setPanelWidth(newWidth);
         }
         return;
       }
@@ -221,6 +330,8 @@ export default function ChallengeMode({ onBack }) {
           if (newQuestion) {
             questionManager.updateCurrentQuestion(newQuestion);
             playerInput.updateCurrentAnswer(newQuestion.answer, newQuestion.difficulty);
+            const newWidth = calculatePanelWidth(newQuestion);
+            setPanelWidth(newWidth);
           }
           return true;
         }
@@ -242,6 +353,8 @@ export default function ChallengeMode({ onBack }) {
           if (newQuestion) {
             questionManager.updateCurrentQuestion(newQuestion);
             playerInput.updateCurrentAnswer(newQuestion.answer, newQuestion.difficulty);
+            const newWidth = calculatePanelWidth(newQuestion);
+            setPanelWidth(newWidth);
           }
           return true;
         } else {
@@ -250,7 +363,15 @@ export default function ChallengeMode({ onBack }) {
         return false;
       }
     },
-    [questionManager, playerInput, zombieManager, gameState.currentDifficulty]
+    [
+      questionManager,
+      playerInput,
+      zombieManager,
+      gameState.currentDifficulty,
+      calculatePanelWidth,
+      setPanelWidth,
+      themeManager
+    ]
   );
 
   // Initialize game, generate first zombie
@@ -349,9 +470,67 @@ export default function ChallengeMode({ onBack }) {
     zombieManager.resetChargeRate();
   }, [initializeGameState, playerInput, zombieManager, themeManager, questionManager]);
 
+  // Helper function to calculate countdown timer
+  const getCountdownTime = useCallback(() => {
+    const chargeRate = zombieManager.getCurrentChargeRate();
+    const chargeSpeed = levelManager.getChargeSpeed();
+    return Math.round((1 - chargeRate) / chargeSpeed / (1000 / GAME_CONFIG.CHARGE_INTERVAL));
+  }, [zombieManager, levelManager]);
+
+  // Helper function to get timer CSS class based on remaining time
+  const getTimerClass = useCallback(() => {
+    const timeLeft = getCountdownTime();
+    if (timeLeft <= 2) return 'countdown-timer danger';
+    if (timeLeft <= 5) return 'countdown-timer warning';
+    return 'countdown-timer';
+  }, [getCountdownTime]);
+
+  // Helper function to render input letters with visual feedback
+  const renderInputDisplay = () => {
+    if (!questionManager.currentQuestion) return null;
+
+    const targetWord = questionManager.currentQuestion.answer;
+    const currentInput = playerInput.currentInput || '';
+
+    return (
+      <div className="input-display">
+        {targetWord.split('').map((letter, index) => {
+          let className = 'input-letter';
+          let displayContent = '';
+
+          if (index < currentInput.length) {
+            // Character has been typed - show the player's actual input
+            displayContent = currentInput[index];
+            if (currentInput[index] === letter) {
+              className += ' typed-correct';
+            } else {
+              className += ' typed-incorrect';
+            }
+          } else {
+            // Not yet typed - show empty content but preserve space for underline
+            displayContent = ''; // Empty string instead of '_'
+            className += ' untyped';
+          }
+
+          return (
+            <span
+              key={index}
+              className={className}
+            >
+              {displayContent}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
   // Render game UI
   return (
-    <div className="d-flex flex-column align-items-center justify-content-center vh-100 text-center bg-dark text-light p-4">
+    <div
+      className="challenge-mode-container fade-in"
+      onClick={handleContainerClick}
+    >
       {gameState.gameOver ? (
         // Game over screen
         <SummaryPage
@@ -361,78 +540,102 @@ export default function ChallengeMode({ onBack }) {
       ) : (
         // Active game screen
         <>
-          <h1 className="display-4 fw-bold text-warning mb-4">Monster Typing Game</h1>
-          <p className="lead">Type the word to defeat the monster!</p>
-          {/* Boss hp */}
+          {/* Life Hearts - Top Left */}
+          <div className="life-hearts-container">
+            {[...Array(gameState.lives)].map((_, i) => (
+              <div
+                key={i}
+                className="life-heart"
+              />
+            ))}
+          </div>
+
+          {/* Game Info - Top Right */}
+          <div className="game-info-container">
+            <div className="info-badge theme">Theme: {gameState.currentTheme}</div>
+            <div className="info-badge level">Level: {gameState.level}</div>
+          </div>
+
+          {/* Boss HP Indicator */}
           {zombieManager.getCurrentZombie()?.behavior === 'boss' && (
-            <div className="d-flex justify-content-center mb-3">
+            <div className="boss-hp-container">
               {[...Array(3)].map((_, i) => {
                 const bossHp = zombieManager.getExtraState('bossHp') ?? 3;
                 return (
                   <div
                     key={i}
-                    style={{
-                      width: '25px',
-                      height: '25px',
-                      margin: '0 5px',
-                      borderRadius: '50%',
-                      backgroundColor: i < bossHp ? 'red' : 'lightgray',
-                      boxShadow: '0 0 5px rgba(0,0,0,0.5)'
-                    }}
+                    className={`boss-hp-dot ${i < bossHp ? 'active' : 'inactive'}`}
                   />
                 );
               })}
             </div>
           )}
-          {/* Time remaining indicator */}
-          <p
-            className={`mt-2 fw-bold ${zombieManager.getCurrentChargeRate() >= 0.75 ? 'text-danger' : 'text-warning'} bg-dark py-2 px-4 rounded-pill shadow`}
-          >
-            Time Left:{' '}
-            {Math.round(
-              (1 - zombieManager.getCurrentChargeRate()) /
-                levelManager.getChargeSpeed() /
-                (1000 / GAME_CONFIG.CHARGE_INTERVAL)
-            )}
-            s{' '}
-          </p>
-          {/* Zombie visualization */}
-          <div
-            className="position-relative d-flex justify-content-center align-items-center my-4"
-            style={{
-              transform: `scale(${zombieManager.getCurrentChargeRate()})`,
-              transition: 'transform 0.3s linear'
-            }}
-          >
+
+          {/* Simplified Countdown Timer */}
+          <div className={getTimerClass()}>{getCountdownTime()}</div>
+
+          {/* Character Container */}
+          <div className="character-container">
             <img
-              src={zombieManager.getCurrentZombieImage()}
-              alt="Zombie"
-              className="img-fluid rounded-circle border border-warning bg-light p-3 shadow-lg"
-              style={{ width: '250px', height: '250px' }}
+              src={zombieCharacter}
+              alt="Zombie Character"
+              className="zombie-character"
             />
           </div>
 
-          {/* Current word display */}
-          <div className="bg-warning text-dark px-4 py-2 rounded-pill fs-4 fw-bold border border-dark shadow mb-4">
-            {questionManager.currentQuestion ? questionManager.currentQuestion.description : ''}
+          {/* Question Panel */}
+          <div className="question-panel-container">
+            <div
+              className="parchment-panel"
+              style={{ width: `${panelWidth}px` }}
+            >
+              <div className="question-text-english">
+                {questionManager.currentQuestion
+                  ? questionManager.currentQuestion.description
+                  : '錯誤：沒有題目'}
+              </div>
+              {/* Chinese translation */}
+              <div className="question-text-chinese">
+                {questionManager.currentQuestion?.translation || '此題沒有中文翻譯'}
+              </div>
+            </div>
           </div>
 
-          {/* User input field */}
-          <input
-            type="text"
-            ref={playerInput.registerInputRef}
-            onChange={handleInputWithMimic}
-            className={`form-control text-center w-50 mx-auto p-3 fs-4 border border-warning shadow-lg ${playerInput.isWrong ? 'shake' : ''}`}
-            autoFocus
-            disabled={gameState.gameOver}
+          {/* Hidden element for text measurement */}
+          <div
+            ref={textMeasureRef}
+            style={{
+              position: 'absolute',
+              left: '-9999px',
+              top: '-9999px',
+              visibility: 'hidden',
+              whiteSpace: 'nowrap'
+            }}
           />
-          {/* Game stats */}
-          <div className="d-flex justify-content-around w-50 mt-3">
-            <p className="badge bg-danger p-2">Lives: {gameState.lives}</p>
-            <p className="badge bg-success p-2">Theme: {gameState.currentTheme}</p>
-            <p className="badge bg-warning p-2">
-              Charge: {zombieManager.getCurrentChargeRate().toFixed(2)}%
-            </p>
+
+          {/* Input Area with Visual Display */}
+          <div className="input-area-container">
+            {/* Hidden actual input field for functionality */}
+            <input
+              type="text"
+              ref={playerInput.registerInputRef}
+              onChange={handleInputWithMimic}
+              className="typing-input"
+              autoFocus
+              disabled={gameState.gameOver}
+              style={{ position: 'absolute', left: '-9999px', opacity: 0 }}
+            />
+
+            {/* Visual Text Display */}
+            {renderInputDisplay()}
+          </div>
+
+          {/* Charge Progress Bar */}
+          <div className="charge-progress-bar">
+            <div
+              className="charge-progress-fill"
+              style={{ width: `${zombieManager.getCurrentChargeRate() * 100}%` }}
+            />
           </div>
         </>
       )}
